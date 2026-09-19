@@ -75,8 +75,8 @@ pub fn kobo_router(state: AppState) -> Router {
 /// Benign `200 {}` for store paths the firmware derives from `api_endpoint`
 /// itself (`v1/user/profile`, `v1/deals`, …), bypassing the initialization
 /// resources map that points them at Kobo. A 404 on any of them makes the
-/// device abort the whole sync before `library/sync`; another implementation answers the
-/// same paths with an empty object. The log line doubles as capture data for
+/// device abort the whole sync before `library/sync`, so every one of them
+/// answers with an empty object. The log line doubles as capture data for
 /// the #928 golden fixture.
 async fn store_stub(auth: KoboAuthUser, Path((_token, rest)): Path<(String, String)>) -> Response {
     // `?rest` (Debug) escapes control chars the router percent-decodes into

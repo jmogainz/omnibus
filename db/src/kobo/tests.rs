@@ -141,8 +141,8 @@ async fn sync_books_enumerates_every_opted_in_book_with_no_cap() {
 
     let rows = sync_books(&pool, user).await.unwrap();
 
-    // Deliberately never adopts another implementation's SYNC_ITEM_LIMIT=100 cap — and
-    // notably not the shelf read path's MAX_BOOKS_RETURNED=500 either.
+    // Deliberately uncapped: the page size bounds a response, never the sync,
+    // and notably not the shelf read path's MAX_BOOKS_RETURNED=500 either.
     assert_eq!(rows.len(), 150);
 }
 

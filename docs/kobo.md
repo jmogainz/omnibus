@@ -190,13 +190,10 @@ wrong.
 > [#1629](https://github.com/omnibus-library/omnibus/issues/1629)).
 >
 > This repo still carries no captured device PATCH for the Reading Services
-> protocol, but a follow-up investigation found a genuine shape difference
-> against another open-source implementation — an
-> actively-developed, open-source Kobo sync project whose own Reading
-> Services client (`kobo-annotation-payload.ts` /
-> `annotation-style-map.ts`) sends `highlightColor` as one of **four fixed
-> hex swatches**, explicitly commented "Kobo firmware's four fixed highlight
-> colors":
+> protocol, but a follow-up investigation turned up a genuine shape
+> difference: the firmware's own highlight menu offers exactly **four fixed
+> swatches**, and the wire value for one appears to be its hex colour rather
+> than a CSS-style name:
 >
 > | Named colour | Hex swatch |
 > |---|---|
@@ -215,10 +212,10 @@ wrong.
 > so an already-adopted device or an unverified firmware revision that still
 > sends a name keeps working.
 >
-> **This is still unverified against real hardware** — another project's own
-> source carries no comment or test citing a device capture for this exact
-> field either, so this fix is corroborated by a comparable open-source
-> implementation, not proven. If highlights pushed from Omnibus still land
+> **This is still unverified against real hardware** — nothing available
+> here pins this exact field to a device capture, so the fix is inferred
+> from the observed symptom, not proven. If highlights pushed from Omnibus
+> still land
 > as yellow after this change, the firmware likely ignores `highlightColor`
 > on inbound annotations entirely rather than wanting a different shape, and
 > that would be the next thing to rule out. Kobo's classic highlight menu

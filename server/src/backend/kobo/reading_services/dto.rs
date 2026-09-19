@@ -234,11 +234,9 @@ pub fn color_from_kobo(raw: Option<&str>) -> HighlightColor {
 }
 
 /// The four fixed hex swatches Kobo firmware's own highlight menu renders —
-/// not CSS-style names. Cross-referenced against the equivalent field in
-/// another project's Reading Services client (the one open-source Kobo sync
-/// project this investigation found modelling the wire value as a hex
-/// swatch rather than a name), since this repo has no captured device PATCH
-/// to confirm it directly; see the `docs/kobo.md` note on #1629 for the
+/// not CSS-style names. This repo has no captured device PATCH confirming the
+/// wire shape directly, so the hex form is inferred from the observed
+/// symptom rather than proven; see the `docs/kobo.md` note on #1629 for the
 /// caveat. Firmware has no fifth swatch for violet, so it snaps to pink —
 /// the nearest of the four by RGB distance, same as rose.
 fn color_from_kobo_hex(raw: &str) -> Option<HighlightColor> {

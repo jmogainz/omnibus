@@ -164,8 +164,8 @@ pub struct ReadingState {
     pub entitlement_id: String,
     pub created: String,
     pub last_modified: String,
-    /// Mirrors [`Self::last_modified`] — another implementation's implementation notes
-    /// the two are always equal on a real store response.
+    /// Mirrors [`Self::last_modified`] — the two are always observed equal on
+    /// a real store response.
     pub priority_timestamp: String,
     pub status_info: StatusInfo,
     pub current_bookmark: CurrentBookmark,

@@ -23,7 +23,7 @@ async fn library_sync_rejects_an_invalid_token() {
 
 #[tokio::test]
 async fn library_sync_delivers_every_book_across_the_continue_loop() {
-    // 150 books > SYNC_PAGE_SIZE (100): exercises the real continue loop, unlike another implementation's SYNC_ITEM_LIMIT nothing is dropped.
+    // 150 books > SYNC_PAGE_SIZE (100): exercises the real continue loop and asserts nothing is dropped.
     let (app, pool, token, uid) = fixture().await;
     let mut uuids = Vec::new();
     for i in 0..150 {

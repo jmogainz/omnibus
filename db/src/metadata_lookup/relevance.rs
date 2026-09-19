@@ -8,9 +8,10 @@
 //! that are coincidences rather than matches are dropped before they are
 //! returned.
 //!
-//! Ported from another project's `candidate-relevance.ts` + `title-match.ts`, whose
-//! constants and thresholds are reproduced exactly; the two deliberate
-//! divergences are called out on [`normalize_title_text`] and [`levenshtein`].
+//! The tier weights and thresholds below are one tuned set rather than
+//! independent knobs — moving one without the others changes which tier wins
+//! a tie. Two non-obvious choices are called out on [`normalize_title_text`]
+//! and [`levenshtein`].
 
 use std::sync::OnceLock;
 
@@ -104,12 +105,10 @@ fn non_word() -> &'static Regex {
 /// non-Latin script, making two providers reporting the identical Japanese or
 /// Russian title look like different books.
 ///
-/// **Deliberate divergence from the source implementation**: spacing combining
-/// marks (`\p{Mc}`) are *kept*. another project's comment says they are, but its
-/// character class drops them — which splits every Devanagari, Bengali, or
-/// Tamil word at its vowel signs ("हिन्दी" → "ह नद") and then loses most of the
-/// fragments to the one-character token filter. We keep them, as that comment
-/// intended.
+/// Spacing combining marks (`\p{Mc}`) are deliberately **kept**, unlike the
+/// nonspacing ones stripped above: dropping both splits every Devanagari,
+/// Bengali, or Tamil word at its vowel signs ("हिन्दी" → "ह नद") and then loses
+/// most of the fragments to the one-character token filter.
 pub fn normalize_title_text(value: &str) -> String {
     let decomposed: String = value.nfkd().collect();
     let stripped = nonspacing_marks().replace_all(&decomposed, "");
@@ -183,11 +182,11 @@ fn at_boundary(haystack: &str, at: usize, len: usize) -> bool {
 
 /// Plain Levenshtein edit distance over Unicode scalar values.
 ///
-/// **Not** Damerau — a transposition costs two edits, not one — matching the
-/// `fastest-levenshtein` semantics this port reproduces. Counted in `char`s
-/// rather than the source's UTF-16 code units, which agree for everything in
-/// the Basic Multilingual Plane and differ only for astral-plane text, where
-/// counting scalar values is the more defensible answer anyway.
+/// **Not** Damerau — a transposition costs two edits, not one, which keeps the
+/// distance cheap enough to run over every candidate. Counted in `char`s rather
+/// than UTF-16 code units: the two agree for everything in the Basic
+/// Multilingual Plane and differ only for astral-plane text, where counting
+/// scalar values is the more defensible answer anyway.
 fn levenshtein(a: &[char], b: &[char]) -> usize {
     if a.is_empty() {
         return b.len();

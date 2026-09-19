@@ -63,8 +63,8 @@ fn normalize_title_text_keeps_non_latin_scripts_intact() {
 
 #[test]
 fn normalize_title_text_keeps_indic_vowel_signs_rather_than_splitting_the_word() {
-    // The deliberate divergence from the source implementation, whose
-    // character class drops spacing marks and shatters the word: "ह नद".
+    // Spacing marks are kept on purpose: dropping them alongside the
+    // nonspacing ones shatters the word into "ह नद".
     let folded = normalize_title_text("हिन्दी");
     assert!(
         !folded.contains(' '),

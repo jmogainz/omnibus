@@ -18,7 +18,7 @@ use omnibus_db::{self as db, worker::Task};
 use super::{dto, extractor::KoboAuthUser, origin_from_headers, reject_oversized_uuid, AppState};
 use crate::http_errors::internal;
 
-/// Changes per `library/sync` response; more remain → `x-kobo-sync: continue`, bounding the response but never the sync (unlike another implementation's `SYNC_ITEM_LIMIT`).
+/// Changes per `library/sync` response; more remain → `x-kobo-sync: continue`, bounding the response but never the sync — no book is ever dropped.
 const SYNC_PAGE_SIZE: usize = 100;
 
 /// Per-sync cap on CFI→span derivations. Each one walks a whole book's
@@ -28,8 +28,8 @@ const SYNC_PAGE_SIZE: usize = 100;
 const SPAN_DERIVATIONS_PER_SYNC: usize = 8;
 
 /// `GET library/sync` — the per-device delta, streamed as a JSON array via
-/// [`Body::from_stream`] with no item cap (unlike another implementation's
-/// `SYNC_ITEM_LIMIT=100`). First sync emits the whole opted-in set as
+/// [`Body::from_stream`] with no item cap, so a large library syncs whole.
+/// First sync emits the whole opted-in set as
 /// `NewEntitlement`s; later syncs emit only `ChangedProductMetadata` +
 /// `ChangedReadingState` for modified books and `ChangedEntitlement
 /// {IsRemoved:true}` for books that left the opted-in set (#922).
@@ -505,7 +505,7 @@ pub async fn library_metadata(
 /// `GET library/<uuid>/state` — the device's pull of the server-side reading
 /// state for one book, the request the firmware adopts a position from: a
 /// one-element array of the same `ReadingState` shape the PUT consumes and
-/// `library/sync` emits (another implementation contract).
+/// `library/sync` emits.
 ///
 /// Deliberately shares `library/sync`'s span enrichment, side effects
 /// included: a CFI-only position goes out as an exact KoboSpan, the derived
