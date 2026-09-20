@@ -1,115 +1,140 @@
 # Running Omnibus with Docker
 
-Omnibus ships a multi-stage [`Dockerfile`](../Dockerfile) and a
-[`docker-compose.yml`](../docker-compose.yml) modelled on the Jellyfin
-convention: bind-mount your media read-write, keep durable state in `/config`
-and a regenerable cache in `/cache`, and configure everything through env.
-
-> The Nix dev shell (see [local-development.md](local-development.md)) is
-> still the supported way to *develop*. Docker is for *deploying* a built server.
+Omnibus is published as a ready-to-run image on Docker Hub:
+[`sesloan/omnibus`](https://hub.docker.com/r/sesloan/omnibus/tags). It runs on
+amd64 and arm64 and already contains everything the server needs, including
+ffmpeg for audiobook streaming and kepubify for Kobo downloads. You do not need
+a copy of this repository to run it. A folder and a compose file are enough.
 
 ## Quick start
 
-```bash
-# 1. Point the library mounts at your books and set your access URL.
-$EDITOR docker-compose.yml
+1. Make a folder for Omnibus and open a terminal in it:
 
-# 2. Build the bundle and start (first build is slow — it compiles the
-#    workspace and the WASM client).
-docker compose up -d --build
+   ```bash
+   mkdir omnibus && cd omnibus
+   ```
 
-# 3. Open http://localhost:3000 (or whatever you set) and register.
-#    The FIRST account created is automatically the admin.
-```
+2. Save the following as `docker-compose.yml` in that folder:
 
-## Volumes
+   ```yaml
+   services:
+     omnibus:
+       image: sesloan/omnibus:latest
+       container_name: omnibus
+       restart: unless-stopped
 
-| Container path | Contents | Back up? | Compose default |
-|---|---|---|---|
-| `/config` | SQLite DB (`omnibus.db`) + cover images + journal images | **Yes** | `./config` |
-| `/cache` | WebP thumbnails + HLS transcode segments | No (regenerated) | `./cache` |
-| `/books` | Ebook library | n/a (your data) | edit the bind mount |
-| `/audiobooks` | Audiobook library | n/a (your data) | edit the bind mount |
+       ports:
+         - "3000:3000"                            # host:container — change the left side if 3000 is taken
 
-Covers live under `/config` because they aren't reconstructible from the library
-files, and images a reader attaches to a journal entry sit beside them for the
-same reason — nothing else holds a copy. Thumbnails and HLS segments live under
-`/cache` because the server rebuilds them on demand and evicts them under a size
-cap, so deleting that volume costs only the next re-encode.
+       volumes:
+         - ./config:/config                       # database, covers, journal images — back this up
+         - ./cache:/cache                         # thumbnails and audio transcodes — safe to delete
+         - /path/to/your/ebooks:/books            # EDIT: your ebook folder
+         - /path/to/your/audiobooks:/audiobooks   # EDIT: your audiobook folder
 
-### Upgrading from a release before journal images moved
+       environment:
+         PUID: "1000"                             # EDIT if `id -u` is not 1000 — files are written as this user
+         PGID: "1000"                             # EDIT if `id -g` is not 1000
+         OMNIBUS_PUBLIC_ORIGIN: "http://localhost:3000"   # EDIT: the exact address you open in the browser
+         OMNIBUS_SECURE_COOKIES: "0"              # 0 over plain http; set to 1 (or remove) behind HTTPS
+         EBOOK_LIBRARY_PATH: "/books"
+         AUDIOBOOK_LIBRARY_PATH: "/audiobooks"
+   ```
 
-Journal images used to land in `/cache/data/journal-images` — inside the volume
-this page calls safe to delete. On the first boot after upgrading, the server
-moves any it finds there into `/config/journal-images` and logs `relocated
-journal images out of the data dir default` with `moved` and `found` counts.
-There is nothing to do by hand when those two agree; if `moved` is short of
-`found`, a `failed to relocate journal image` warning above it names each file
-still sitting in `/cache`, so fix that before deleting the volume. If you had
-already cleared `/cache` (or run `docker compose down -v`) on an affected
-release, those images are gone and the entries embedding them render a broken
-image.
+3. Change the lines marked `EDIT`:
 
-## Key environment variables
+   - **The two library paths.** Replace `/path/to/your/ebooks` and
+     `/path/to/your/audiobooks` with the folders on your machine. Leave the
+     right-hand side (`/books`, `/audiobooks`) alone. If you only have one kind
+     of library, point both at real folders anyway. An empty one is fine.
+   - **`OMNIBUS_PUBLIC_ORIGIN`.** The address you will actually type into the
+     browser. `http://localhost:3000` is right if you open it on the same
+     machine. If you will open it from another device on your network, use that
+     address instead, for example `http://192.168.1.10:3000`. You can list
+     several, separated by commas. If this does not match, logging in fails
+     with a 403.
+   - **`PUID` and `PGID`**, if your user is not `1000`. Run `id -u` and `id -g`
+     to check. Omnibus writes its database and cache as this user, so the files
+     end up owned by you rather than root.
 
-| Variable | Why it matters |
+4. Start it:
+
+   ```bash
+   docker compose up -d
+   ```
+
+5. Open the address you set in a browser and register. **The first account
+   created is the admin.** Omnibus scans both libraries on every start.
+
+## Already have a compose file?
+
+- Copy the `omnibus:` block into your `services:` section.
+- Make the same `EDIT` changes.
+- `./config` and `./cache` are relative to your compose file. Use an absolute path if you prefer, e.g. `/srv/omnibus/config:/config`.
+- Port 3000 taken? Change the left side of `ports`, and change `OMNIBUS_PUBLIC_ORIGIN` to match.
+
+## Settings
+
+| Setting | Meaning |
 |---|---|
-| `OMNIBUS_PUBLIC_ORIGIN` | Must list the exact URL(s) you open in the browser, or authenticated POSTs are rejected with 403. Comma-separate multiples. |
-| `OMNIBUS_SECURE_COOKIES` | Set `0` when serving plain `http://` (LAN/no TLS) — otherwise the session cookie is `Secure`-only and login silently fails. Set `1` behind HTTPS. |
-| `EBOOK_LIBRARY_PATH` / `AUDIOBOOK_LIBRARY_PATH` | The in-container mount targets. Set both or neither (setting one clears the other). Omit both to configure libraries from the Settings UI instead. |
-| `IP` / `PORT` | Bind address. The image defaults to `IP=0.0.0.0` so the container is reachable; `PORT` defaults to `3000`. |
+| `./config:/config` | Database, covers, journal images. **Back this up.** |
+| `./cache:/cache` | Thumbnails and audio transcodes. Safe to delete. |
+| `/books`, `/audiobooks` | Your libraries. Add `:ro` to make them read-only (disables in-app uploads). |
+| `PUID`, `PGID` | Run as this user and group. Files land owned by you. |
+| `OMNIBUS_PUBLIC_ORIGIN` | The address you open in the browser. Must match, or login fails. Comma-separate several. |
+| `OMNIBUS_SECURE_COOKIES` | `0` on plain http. `1` or removed behind HTTPS. |
+| `EBOOK_LIBRARY_PATH`, `AUDIOBOOK_LIBRARY_PATH` | Library folders inside the container. Leave as is. Remove **both** to set libraries in the app instead. |
 
-The image bakes sensible defaults for `DATABASE_URL`, `OMNIBUS_COVERS_DIR`,
-`OMNIBUS_JOURNAL_IMAGES_DIR`, `OMNIBUS_THUMBS_DIR`, and `OMNIBUS_DATA_DIR` so they
-land in the volumes above — override only if you change the mount layout. See [`.env.example`](../.env.example)
-for the full annotated list of supported variables.
+More optional settings: [`.env.example`](../.env.example).
 
-## File ownership (PUID / PGID)
+## Backups
 
-Same convention as the linuxserver.io images: set `PUID` and `PGID` to your host
-user's IDs (find them with `id -u` and `id -g`) so the server writes `./config`
-and `./cache` as you, and files land owned by your account rather than root.
-They default to `1000:1000`.
-
-```yaml
-environment:
-  PUID: "1000"
-  PGID: "1000"
-```
-
-The container starts as root only long enough for the entrypoint to apply these
-IDs and fix ownership of the two volume roots, then drops to the unprivileged
-`omnibus` user before running the server. The library mounts need to be
-readable by that user, and writable if you want in-app uploads to land there.
-Migrating data that's currently owned by a different UID? `chown` it once on
-the host — the entrypoint only adjusts the mount roots, not their existing
-contents.
+- Back up `config`. It cannot be rebuilt.
+- Skip `cache`. Omnibus rebuilds it.
+- Your library folders are yours. Omnibus never moves or renames files in them.
 
 ## Behind a reverse proxy (HTTPS)
 
-Terminate TLS at nginx/Caddy/Traefik, proxy to the container's port, then:
+- Terminate TLS in nginx, Caddy or Traefik. Proxy to port 3000.
+- Set `OMNIBUS_PUBLIC_ORIGIN` to your `https://` address.
+- Set `OMNIBUS_SECURE_COOKIES` to `1`, or remove it.
+- Optional: `OMNIBUS_TRUST_FORWARDED_FOR: "1"` so rate limiting sees real client IPs. Only if your proxy strips incoming `X-Forwarded-For`.
 
-- set `OMNIBUS_PUBLIC_ORIGIN` to your public `https://` origin,
-- remove `OMNIBUS_SECURE_COOKIES` (or set `1`),
-- only set `OMNIBUS_TRUST_FORWARDED_FOR=1` if the proxy strips inbound
-  `X-Forwarded-For` — otherwise clients can spoof the rate-limit key. See the
-  warning in [`.env.example`](../.env.example).
+## Updating
 
-## Admin recovery
+```bash
+docker compose pull
+docker compose up -d
+```
 
-There is no separate admin-seed for production (the dev seed is compiled out of
-release builds). If you lose admin access, set `OMNIBUS_INITIAL_ADMIN=<username>`
-on an existing account, restart once, then **remove it** — it re-promotes on
-every boot while set.
+- `latest` is the newest release.
+- Pin a version with a tag, e.g. `sesloan/omnibus:0.37.4`.
+- Database migrations run on start.
+
+## Locked out?
+
+- Add `OMNIBUS_INITIAL_ADMIN: "yourusername"` to `environment`. Use an account that exists.
+- Restart once. That account is now admin.
+- **Remove the line.** It re-promotes on every start while set.
+
+## Building from source
+
+- Clone the repo.
+- In `docker-compose.yml`, replace `image:` with `build: .`.
+- Run `docker compose up -d --build`. The first build is slow.
 
 ## Troubleshooting
 
-- **Login does nothing / 403 on POST** — `OMNIBUS_PUBLIC_ORIGIN` doesn't match
-  the browser URL, or `OMNIBUS_SECURE_COOKIES` is on over plain http.
-- **Container unreachable** — confirm `IP=0.0.0.0` (the image default) and that
-  the host port mapping isn't already taken.
-- **No audiobook playback** — ffmpeg is bundled in the image; check the
-  container logs for transcode errors and that the audiobook mount is populated.
-- **Empty library** — verify the library mounts resolve to real directories on the
-  host and that `EBOOK_LIBRARY_PATH` / `AUDIOBOOK_LIBRARY_PATH` match the mount
-  targets.
+- **Login does nothing / 403.** `OMNIBUS_PUBLIC_ORIGIN` does not match your browser address, or `OMNIBUS_SECURE_COOKIES` is not `0` on plain http.
+- **Page will not load.** The host port is taken, or you opened the container port instead of the host port.
+- **Library is empty.** The host paths on the left of `/books` and `/audiobooks` do not exist, or the `PUID` user cannot read them.
+- **Audiobooks will not play.** Check `docker compose logs omnibus` for transcode errors. Confirm the audiobook folder is not empty.
+- **Files owned by root.** Set `PUID` and `PGID` to your IDs. Then `chown` anything created before the change.
+
+## Upgrading from an early release
+
+- Journal images used to live under `/cache`.
+- First start after upgrading moves them to `/config/journal-images`.
+- The log line `relocated journal images out of the data dir default` reports `moved` and `found`. Equal means done.
+- `moved` lower than `found`? A `failed to relocate journal image` warning names each file. Fix those before deleting `cache`.
+- Cache already cleared on an affected release? Those images are gone. Their entries show a broken image.
