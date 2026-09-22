@@ -387,9 +387,24 @@ Features/           — one directory per surface: Account, AddBooks, Auth,
                       `WishlistSection` is the native twin of the web page's
                       rail tracking card (tracked-since line, store search,
                       remove): same never-queued contract, plus a confirmation
-                      the web button doesn't ask for. `JournalMarkdown` is the
-                      journal body's renderer — the web sets the server's
-                      `body_html` with `dangerous_inner_html`, which SwiftUI
+                      the web button doesn't ask for. Its `ChipEditSheet` is
+                      the native twin of the web hero's "+ genres" / "+ tags"
+                      editors (`pages/book_detail/chips.rs`): a "+" chip on
+                      the Home section's genre and tag rows, shown to a reader
+                      with `can_edit` or admin and greyed offline, opens a
+                      sheet where every add/remove saves at once as a
+                      `genres` / `subjects` override — never queued (rule 08)
+                      — and `ChipEditKind` holds the per-kind list/payload
+                      split. `ChipEditCommitter` is the save policy behind it,
+                      shared across sheet presentations and keyed by (book,
+                      kind): requests leave in tap order, only the newest
+                      answer paints, a refused save resyncs before it
+                      reverts; its save/resync/persist legs are injected, so
+                      `ChipEditCommitterTests` drives it without a server. `DetailRead.homeLifted` keeps the flow layout's
+                      Home whole at every scroll position; only the marquee
+                      trims at rest. `JournalMarkdown` is the journal body's
+                      renderer — the web sets the server's `body_html` with
+                      `dangerous_inner_html`, which SwiftUI
                       has no equivalent of, so the native app renders from the
                       `body_md` riding alongside it and carries its own
                       line-based splitter (paragraphs,
