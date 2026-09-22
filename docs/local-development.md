@@ -154,8 +154,9 @@ server URL to enter on the Connect screen. Pin a specific simulator with
 `OMNIBUS_IOS_SIM_UDID` if you don't want the newest iPhone runtime. The two
 test recipes never touch that simulator: `scripts/ios-test.sh` creates its own
 `omnibus-tests` device on the newest iPhone runtime (name it with
-`OMNIBUS_IOS_SIM_NAME`) and reuses it, because the UI suite's `--uitest-reset`
-wipes the stored server and token on whatever device it runs against.
+`OMNIBUS_IOS_SIM_NAME`, pin one with `OMNIBUS_IOS_TEST_SIM_UDID`) and reuses
+it, because the UI suite's `--uitest-reset` wipes the stored server and token
+on whatever device it runs against.
 
 ### Android — Dioxus shell (`mobile/` crate)
 

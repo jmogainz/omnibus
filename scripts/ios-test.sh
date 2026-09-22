@@ -6,11 +6,15 @@
 # Usage: ios-test.sh <unit|ui|all> [extra xcodebuild args...]
 # Env:   OMNIBUS_IOS_RESULTS_DIR  where <suite>.xcresult lands
 #                                 (default .claude/runtime/ios-tests)
-#        OMNIBUS_IOS_SIM_UDID     pin a specific simulator instead of the
-#                                 dedicated test device below
-#        OMNIBUS_IOS_SIM_NAME     name of that dedicated device, created on
-#                                 the newest iPhone runtime when missing
+#        OMNIBUS_IOS_SIM_NAME     name of the dedicated test device, created
+#                                 on the newest iPhone runtime when missing
 #                                 (default omnibus-tests)
+#        OMNIBUS_IOS_TEST_SIM_UDID
+#                                 pin a specific simulator instead. Not
+#                                 OMNIBUS_IOS_SIM_UDID on purpose: that pins
+#                                 the device `just ios-sim` and the explore
+#                                 lane keep signed in, which the UI suite
+#                                 would reset.
 set -euo pipefail
 
 suite="${1:?usage: ios-test.sh <unit|ui|all> [xcodebuild args...]}"
@@ -45,8 +49,8 @@ mkdir -p "$results_dir"
 rm -rf "$results_dir/$suite.xcresult"
 
 sim_name="${OMNIBUS_IOS_SIM_NAME:-omnibus-tests}"
-if [ -n "${OMNIBUS_IOS_SIM_UDID:-}" ]; then
-  udid="$OMNIBUS_IOS_SIM_UDID"
+if [ -n "${OMNIBUS_IOS_TEST_SIM_UDID:-}" ]; then
+  udid="$OMNIBUS_IOS_TEST_SIM_UDID"
 else
   # Newest installed iOS runtime that has an iPhone device, and that iPhone's
   # device type. xcodebuild's destination matcher silently omits simulators
