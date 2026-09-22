@@ -79,6 +79,17 @@ jobs:
           scripts/ios-test.sh unit -derivedDataPath "$RUNNER_TEMP/DerivedData" 2>&1 \
             | xcbeautify --report junit --report-path ios-test-results
 
+      # TEMP diagnostic: always upload, so the reader font suite's boot-phase
+      # timings (printed by the test host, visible only in the bundle's action
+      # log) can be read off a passing run too.
+      - name: Upload xcresult
+        if: ${{ !cancelled() && hashFiles('ios-test-results/unit.xcresult/**') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-xcresult
+          path: ios-test-results/unit.xcresult
+          retention-days: 3
+
       - name: Convert coverage to lcov
         if: ${{ !cancelled() }}
         run: |

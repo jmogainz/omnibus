@@ -79,6 +79,19 @@ private enum ReaderFontTestError: Error, CustomStringConvertible {
     }
 }
 
+/// TEMP instrumentation: wall-clock marks for each boot phase.
+@MainActor
+private final class PhaseLog {
+    private let start = ContinuousClock.now
+    private(set) var marks: [String] = []
+    func mark(_ name: String) {
+        let ms = (ContinuousClock.now - start).components
+        let millis = ms.seconds * 1000 + ms.attoseconds / 1_000_000_000_000_000
+        marks.append("\(name)@\(millis)ms")
+    }
+    var description: String { marks.joined(separator: " ") }
+}
+
 /// Serves the book from a local file and hands everything else to the real
 /// `ReaderWebView.Coordinator`.
 ///
@@ -145,15 +158,28 @@ private final class BootedReader {
     private let window: UIWindow
     private let coordinator: ReaderWebView.Coordinator
     private let handler: FixtureSchemeHandler
+    let phases: PhaseLog
 
     init(controller: ReaderController, webView: WKWebView, window: UIWindow,
-         coordinator: ReaderWebView.Coordinator, handler: FixtureSchemeHandler)
+         coordinator: ReaderWebView.Coordinator, handler: FixtureSchemeHandler,
+         phases: PhaseLog)
     {
         self.controller = controller
         self.webView = webView
         self.window = window
         self.coordinator = coordinator
         self.handler = handler
+        self.phases = phases
+    }
+
+    /// TEMP: what the page and the app say about visibility right now.
+    func visibility() async -> String {
+        let vis: Any? = try? await webView.callAsyncJavaScript(
+            "return document.visibilityState + '/' + (window.__omnibusTestErrors || []).length;",
+            arguments: [:], contentWorld: .page
+        )
+        let scene = (window.windowScene?.activationState).map { "\($0.rawValue)" } ?? "nil"
+        return "page=\(vis.map { String(describing: $0) } ?? "?") app=\(UIApplication.shared.applicationState.rawValue) scene=\(scene)"
     }
 
     func teardown() {
@@ -205,6 +231,7 @@ private final class BootedReader {
 /// a font that is never used is never loaded.
 @MainActor
 private func bootFixtureReader() async throws -> BootedReader {
+    let phases = PhaseLog()
     let epub = try fixtureEPUB()
     let entry = try #require(ReaderWebView.entryURL)
 
@@ -254,6 +281,7 @@ private func bootFixtureReader() async throws -> BootedReader {
         await firstWindowScene(),
         "the test host has no UIWindowScene, so the reader has no screen to lay out against"
     )
+    phases.mark("scene(state=\(scene.activationState.rawValue),app=\(UIApplication.shared.applicationState.rawValue))")
     let window = UIWindow(windowScene: scene)
     window.frame = frame
     let root = UIViewController()
@@ -264,17 +292,28 @@ private func bootFixtureReader() async throws -> BootedReader {
     controller.webView = webView
     let booted = BootedReader(
         controller: controller, webView: webView, window: window,
-        coordinator: coordinator, handler: handler
+        coordinator: coordinator, handler: handler, phases: phases
     )
 
     // `reader.html` posts `hostReady` on load, which the coordinator routes to
     // the controller, which boots the glue — the app's own sequence, driven by
     // nothing but the page.
     webView.load(URLRequest(url: entry))
-    guard await waitUntil({ controller.isReady }) else {
+    phases.mark("load")
+    var sawHostReady = false
+    var sawServed = false
+    let ready = await waitUntil {
+        if !sawServed, !handler.served.isEmpty { sawServed = true; phases.mark("firstServe") }
+        if !sawHostReady, controller.appliedSettings != nil { sawHostReady = true; phases.mark("hostReady") }
+        return controller.isReady
+    }
+    phases.mark(ready ? "ready" : "readyTimeout")
+    phases.mark(await booted.visibility())
+    print("[ReaderEmbeddedFontTests] boot phases: \(phases.description) served=\(handler.served.count)")
+    guard ready else {
         let why = await booted.diagnostics()
         booted.teardown()
-        throw ReaderFontTestError.pageNeverBecameReady(why)
+        throw ReaderFontTestError.pageNeverBecameReady(why + "\nphases: \(phases.description)")
     }
     return booted
 }
@@ -404,8 +443,11 @@ struct ReaderEmbeddedFontTests {
             state = try? await sectionFontState(reader.webView)
             return state?.loadedFamilies.contains(embeddedFamily) ?? false
         }
+        reader.phases.mark(painted ? "embeddedLoaded" : "embeddedTimeout")
+        reader.phases.mark(await reader.visibility())
+        print("[ReaderEmbeddedFontTests] embedded phases: \(reader.phases.description)")
         let font = try #require(state)
-        #expect(painted, "the embedded face never loaded: \(font)")
+        #expect(painted, "the embedded face never loaded: \(font)\nphases: \(reader.phases.description)")
 
         // The book's own face, under the reader's default. Original declares no
         // `font-family` at all, so this is the publisher's `p` rule winning.
@@ -458,6 +500,8 @@ struct ReaderEmbeddedFontTests {
             state = try? await sectionFontState(reader.webView)
             return state?.loadedFamilies.contains(namedFamily) ?? false
         }
+        reader.phases.mark(loaded ? "namedLoaded" : "namedTimeout")
+        print("[ReaderEmbeddedFontTests] named phases: \(reader.phases.description)")
         let font = try #require(state)
 
         // A `loaded` FontFace is the assertion. The other two below look like
