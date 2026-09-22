@@ -79,6 +79,19 @@ jobs:
           scripts/ios-test.sh unit -derivedDataPath "$RUNNER_TEMP/DerivedData" 2>&1 \
             | xcbeautify --report junit --report-path ios-test-results
 
+      # Same reasoning as the ui job's upload below: a Swift Testing issue's
+      # message reaches neither stdout nor JUnit under simulator clones, and
+      # the test host's own stdout is only in the bundle's action log (`xcrun
+      # xcresulttool get log --type action`). Three runs of the reader font
+      # suite timing out were undiagnosable without it.
+      - name: Upload xcresult on failure
+        if: ${{ failure() && hashFiles('ios-test-results/unit.xcresult/**') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-xcresult
+          path: ios-test-results/unit.xcresult
+          retention-days: 7
+
       - name: Convert coverage to lcov
         if: ${{ !cancelled() }}
         run: |
