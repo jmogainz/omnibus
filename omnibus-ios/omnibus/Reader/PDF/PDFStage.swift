@@ -37,6 +37,42 @@ final class PDFStageController {
 
     var pageCount: Int { view?.document?.pageCount ?? 0 }
 
+    /// The current page's frame on screen, in the stage view's coordinates —
+    /// the chrome asks what is behind it against this.
+    func pageFrame() -> CGRect? {
+        guard let view, let page = view.currentPage else { return nil }
+        return view.convert(page.bounds(for: .cropBox), from: page)
+    }
+
+    /// Re-express a window-space rect — SwiftUI's `.global` frames — in the
+    /// stage view's coordinates.
+    func stageRect(fromWindow rect: CGRect) -> CGRect? {
+        guard let view else { return nil }
+        return view.convert(rect, from: nil)
+    }
+
+    /// Mean luminance of the stage's own pixels under `rect` (view
+    /// coordinates). Samples the `PDFView` alone — the SwiftUI chrome sits
+    /// above it, so a sample can never include the thing it is choosing a
+    /// colour for.
+    func meanLuminance(under rect: CGRect) -> Double? {
+        guard let view else { return nil }
+        let target = rect.intersection(view.bounds)
+        guard !target.isNull, target.width >= 2, target.height >= 2 else { return nil }
+        let format = UIGraphicsImageRendererFormat()
+        format.opaque = true
+        format.scale = 1
+        let snapshot = UIGraphicsImageRenderer(bounds: view.bounds, format: format).image { _ in
+            view.drawHierarchy(in: view.bounds, afterScreenUpdates: false)
+        }
+        guard let crop = snapshot.cgImage?.cropping(to: target) else { return nil }
+        return ReaderBackdrop.meanLuminance(of: crop)
+    }
+
+    /// The stage's zoom, republished so the chrome can re-ask what is behind
+    /// it after a pinch settles.
+    var scaleFactor: CGFloat = 1
+
     func go(to page: Int) {
         guard let view, let document = view.document, document.pageCount > 0 else { return }
         let target = min(max(page, 0), document.pageCount - 1)
@@ -144,6 +180,11 @@ struct PDFStage: UIViewRepresentable {
             ) { [weak self] _ in
                 MainActor.assumeIsolated { self?.selectionChanged() }
             })
+            observers.append(center.addObserver(
+                forName: .PDFViewScaleChanged, object: view, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.scaleChanged() }
+            })
 
             // A single tap waits on the double so PDFKit's zoom doesn't also
             // turn a page — the same beat Apple Books takes.
@@ -180,6 +221,13 @@ struct PDFStage: UIViewRepresentable {
             // otherwise sit over the new one.
             if controller.selection != nil { controller.selection = nil }
             if controller.tappedHighlight != nil { controller.tappedHighlight = nil }
+        }
+
+        /// The stage reports every scale change mid-pinch; the chrome
+        /// debounces its resample, so passing each one along is cheap.
+        private func scaleChanged() {
+            guard let view, controller.scaleFactor != view.scaleFactor else { return }
+            controller.scaleFactor = view.scaleFactor
         }
 
         /// Settled selections only: PDFKit reports every handle movement, so

@@ -45,6 +45,19 @@ struct PDFReaderView: View {
     @State private var quoteTarget: QuoteRequest?
     @State private var translateText = ""
     @State private var showTranslate = false
+    /// What each floating control has behind it, sampled when the chrome
+    /// comes up and after anything that moves the page under it. Defaults to
+    /// the stage's ink — the reader's usual ground.
+    @State private var chromeGrounds: [ChromeControl: ReaderGround] = [:]
+    /// Where each control's frame last sat, so a sample knows what to read.
+    @State private var chromeFrames: [ChromeControl: CGRect] = [:]
+    @State private var inkResample: Task<Void, Never>?
+
+    /// The floating controls the chrome samples for — one case per drawn
+    /// control, so a sample always has a frame to ask about.
+    private enum ChromeControl: CaseIterable {
+        case close, contents, bookmarks, bookmark, slider
+    }
 
     private static let sessionCheckpointInterval: TimeInterval = 300
 
@@ -97,7 +110,12 @@ struct PDFReaderView: View {
         }
         .onChange(of: stage.page) { _, turned in
             if page != turned { page = turned }
+            scheduleInkResample()
         }
+        .onChange(of: chromeVisible) { _, visible in
+            if visible { sampleChromeInk() }
+        }
+        .onChange(of: stage.scaleFactor) { _, _ in scheduleInkResample() }
         .onChange(of: highlights) { _, list in stage.paint(list) }
         .onChange(of: audio.isActive) { _, active in
             if !active { showPlayer = false }
@@ -201,13 +219,15 @@ struct PDFReaderView: View {
             VStack {
                 HStack {
                     Spacer()
-                    ReaderGlassButton(
-                        icon: "xmark",
-                        label: "Close book",
-                        ink: .white,
-                        diameter: ReaderMenu.buttonSize
-                    ) {
-                        dismiss()
+                    measure(.close) {
+                        ReaderGlassButton(
+                            icon: "xmark",
+                            label: "Close book",
+                            ink: ink(.close),
+                            diameter: ReaderMenu.buttonSize
+                        ) {
+                            dismiss()
+                        }
                     }
                 }
                 .padding(.horizontal, ReaderMenu.inset)
@@ -216,35 +236,43 @@ struct PDFReaderView: View {
                 Spacer()
 
                 VStack(alignment: .trailing, spacing: ReaderMenu.spacing) {
-                    ReaderMenuRow(
-                        title: "Contents",
-                        icon: "list.bullet",
-                        ink: .white
-                    ) {
-                        contentsTab = .contents
-                        showContents = true
+                    measure(.contents) {
+                        ReaderMenuRow(
+                            title: "Contents",
+                            icon: "list.bullet",
+                            ink: ink(.contents)
+                        ) {
+                            contentsTab = .contents
+                            showContents = true
+                        }
                     }
-                    ReaderMenuRow(
-                        title: "Bookmarks & Highlights",
-                        count: bookmarkCount + highlights.count,
-                        ink: .white
-                    ) {
-                        contentsTab = .bookmarks
-                        showContents = true
+                    measure(.bookmarks) {
+                        ReaderMenuRow(
+                            title: "Bookmarks & Highlights",
+                            count: bookmarkCount + highlights.count,
+                            ink: ink(.bookmarks)
+                        ) {
+                            contentsTab = .bookmarks
+                            showContents = true
+                        }
                     }
                     HStack(spacing: ReaderMenu.spacing) {
                         Spacer()
-                        ReaderGlassButton(
-                            icon: justBookmarked ? "bookmark.fill" : "bookmark",
-                            label: "Add bookmark",
-                            ink: .white,
-                            diameter: ReaderMenu.buttonSize
-                        ) {
-                            Task { await addBookmark() }
+                        measure(.bookmark) {
+                            ReaderGlassButton(
+                                icon: justBookmarked ? "bookmark.fill" : "bookmark",
+                                label: "Add bookmark",
+                                ink: ink(.bookmark),
+                                diameter: ReaderMenu.buttonSize
+                            ) {
+                                Task { await addBookmark() }
+                            }
                         }
                     }
                     if stage.pageCount > 1 {
-                        pageSlider(count: stage.pageCount)
+                        measure(.slider) {
+                            pageSlider(count: stage.pageCount)
+                        }
                     }
                 }
                 .padding(.horizontal, ReaderMenu.inset)
@@ -269,6 +297,58 @@ struct PDFReaderView: View {
         }
     }
 
+    // MARK: - Chrome ink
+
+    /// The ink a floating control draws in, from what was last sampled
+    /// behind it.
+    private func ink(_ control: ChromeControl) -> Color {
+        (chromeGrounds[control] ?? .stage).ink
+    }
+
+    /// Probe a control's frame as it lays out, so a sample always has a
+    /// current rect to ask about.
+    private func measure(
+        _ control: ChromeControl,
+        @ViewBuilder _ content: () -> some View
+    ) -> some View {
+        content()
+            .onGeometryChange(for: CGRect.self) { proxy in
+                proxy.frame(in: .global)
+            } action: { rect in
+                guard chromeFrames[control] != rect else { return }
+                chromeFrames[control] = rect
+                scheduleInkResample()
+            }
+    }
+
+    /// Re-ask every control what is behind it, right now.
+    private func sampleChromeInk() {
+        guard chromeVisible else { return }
+        let page = stage.pageFrame()
+        for control in ChromeControl.allCases {
+            guard let frame = chromeFrames[control],
+                  let rect = stage.stageRect(fromWindow: frame)
+            else { continue }
+            let ground = ReaderBackdrop.ground(
+                control: rect,
+                pageFrame: page,
+                pageLuminance: { overlap in stage.meanLuminance(under: overlap) }
+            )
+            if chromeGrounds[control] != ground { chromeGrounds[control] = ground }
+        }
+    }
+
+    /// Debounce a resample past whatever is still moving — a pinch's dozens
+    /// of scale events, a turn's animation — so the work lands once, settled.
+    private func scheduleInkResample() {
+        inkResample?.cancel()
+        inkResample = Task {
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled else { return }
+            sampleChromeInk()
+        }
+    }
+
     /// The whole-book scrubber: one slider row, page-stepped. Exact from the
     /// first paint — a PDF's page count is the document's, not a locations
     /// pass.
@@ -281,7 +361,7 @@ struct PDFReaderView: View {
             in: 0...Double(count - 1),
             step: 1
         )
-        .tint(.white.opacity(0.85))
+        .tint(ink(.slider).opacity(0.85))
         .padding(.horizontal, 18)
         .frame(width: ReaderMenu.width, height: ReaderMenu.rowHeight)
         .glassEffect(.regular, in: .capsule)
