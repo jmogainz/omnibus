@@ -7,6 +7,7 @@
 
 import CoreGraphics
 import Foundation
+import SwiftUI
 import Testing
 
 @testable import omnibus
@@ -57,6 +58,21 @@ struct ReaderBackdropTests {
     @Test("an unreadable sample keeps the stage's ink")
     func luminanceUnavailable() {
         #expect(ground(page: control, luminance: nil) == .stage)
+    }
+}
+
+@Suite("Reader backdrop ink")
+struct ReaderBackdropInkTests {
+    @Test("the stage keeps white ink on dark glass")
+    func stageInk() {
+        #expect(ReaderGround.stage.ink == .white)
+        #expect(ReaderGround.stage.scheme == .dark)
+    }
+
+    @Test("the page flips ink and glass together")
+    func pageInk() {
+        #expect(ReaderGround.page.ink == ReaderTheme.ink("light"))
+        #expect(ReaderGround.page.scheme == .light)
     }
 }
 

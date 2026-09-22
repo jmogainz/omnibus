@@ -51,6 +51,11 @@ struct PDFReaderView: View {
     @State private var chromeGrounds: [ChromeControl: ReaderGround] = [:]
     /// Where each control's frame last sat, so a sample knows what to read.
     @State private var chromeFrames: [ChromeControl: CGRect] = [:]
+    /// What the last sample read under the page itself — the fallback for a
+    /// control whose frame has not been measured yet, so the first paint of
+    /// the chrome cannot flash white ink on white paper before geometry
+    /// arrives.
+    @State private var stageGround: ReaderGround = .stage
     @State private var inkResample: Task<Void, Never>?
 
     /// The floating controls the chrome samples for — one case per drawn
@@ -293,7 +298,6 @@ struct PDFReaderView: View {
                 )
             }
             .transition(.opacity)
-            .environment(\.colorScheme, .dark)
         }
     }
 
@@ -302,7 +306,7 @@ struct PDFReaderView: View {
     /// The ink a floating control draws in, from what was last sampled
     /// behind it.
     private func ink(_ control: ChromeControl) -> Color {
-        (chromeGrounds[control] ?? .stage).ink
+        (chromeGrounds[control] ?? stageGround).ink
     }
 
     /// Probe a control's frame as it lays out, so a sample always has a
@@ -312,6 +316,10 @@ struct PDFReaderView: View {
         @ViewBuilder _ content: () -> some View
     ) -> some View {
         content()
+            // Glass follows the scheme and the ink follows the ground; both
+            // read from the same sample, so they cannot disagree about the
+            // paper between them.
+            .environment(\.colorScheme, (chromeGrounds[control] ?? stageGround).scheme)
             .onGeometryChange(for: CGRect.self) { proxy in
                 proxy.frame(in: .global)
             } action: { rect in
@@ -321,10 +329,21 @@ struct PDFReaderView: View {
             }
     }
 
-    /// Re-ask every control what is behind it, right now.
+    /// Re-ask every control what is behind it, right now — one snapshot for
+    /// the whole sample, cropped per control.
     private func sampleChromeInk() {
         guard chromeVisible else { return }
         let page = stage.pageFrame()
+        let snapshot = stage.stageSnapshot()
+        // The page's own ground first: it is the fallback ink for controls
+        // whose frames have not landed yet.
+        if let snapshot, let page {
+            stageGround = ReaderBackdrop.ground(
+                control: page,
+                pageFrame: page,
+                pageLuminance: { overlap in stage.meanLuminance(of: snapshot, under: overlap) }
+            )
+        }
         for control in ChromeControl.allCases {
             guard let frame = chromeFrames[control],
                   let rect = stage.stageRect(fromWindow: frame)
@@ -332,7 +351,10 @@ struct PDFReaderView: View {
             let ground = ReaderBackdrop.ground(
                 control: rect,
                 pageFrame: page,
-                pageLuminance: { overlap in stage.meanLuminance(under: overlap) }
+                pageLuminance: { overlap in
+                    guard let snapshot else { return nil }
+                    return stage.meanLuminance(of: snapshot, under: overlap)
+                }
             )
             if chromeGrounds[control] != ground { chromeGrounds[control] = ground }
         }

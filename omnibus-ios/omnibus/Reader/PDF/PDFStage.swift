@@ -28,6 +28,9 @@ final class PDFStageController {
     var selection: PDFSelectionData?
     /// A tapped painted highlight, with where it sits on screen.
     var tappedHighlight: (highlight: Highlight, rects: [PageRect])?
+    /// The stage's zoom, republished so the chrome can re-ask what is behind
+    /// it after a pinch settles.
+    var scaleFactor: CGFloat = 1
 
     fileprivate weak var view: PDFView?
     /// The rows currently painted, so a repaint can take the old ones down.
@@ -51,27 +54,34 @@ final class PDFStageController {
         return view.convert(rect, from: nil)
     }
 
-    /// Mean luminance of the stage's own pixels under `rect` (view
-    /// coordinates). Samples the `PDFView` alone — the SwiftUI chrome sits
-    /// above it, so a sample can never include the thing it is choosing a
-    /// colour for.
-    func meanLuminance(under rect: CGRect) -> Double? {
-        guard let view else { return nil }
-        let target = rect.intersection(view.bounds)
-        guard !target.isNull, target.width >= 2, target.height >= 2 else { return nil }
+    /// One snapshot of the stage's own pixels, taken once per chrome sample
+    /// and cropped per control — a full-hierarchy render per control would
+    /// be five screen renders a sample, one of them at the exact moment the
+    /// chrome animates in. `afterScreenUpdates` is on: the sample wants the
+    /// page that is actually on screen, not the last committed one, or a
+    /// turn's sample can read the page that just left.
+    ///
+    /// Samples the `PDFView` alone — the SwiftUI chrome sits above it, so a
+    /// sample can never include the thing it is choosing a colour for.
+    func stageSnapshot() -> CGImage? {
+        guard let view, view.bounds.width >= 2, view.bounds.height >= 2 else { return nil }
         let format = UIGraphicsImageRendererFormat()
         format.opaque = true
         format.scale = 1
         let snapshot = UIGraphicsImageRenderer(bounds: view.bounds, format: format).image { _ in
-            view.drawHierarchy(in: view.bounds, afterScreenUpdates: false)
+            view.drawHierarchy(in: view.bounds, afterScreenUpdates: true)
         }
-        guard let crop = snapshot.cgImage?.cropping(to: target) else { return nil }
-        return ReaderBackdrop.meanLuminance(of: crop)
+        return snapshot.cgImage
     }
 
-    /// The stage's zoom, republished so the chrome can re-ask what is behind
-    /// it after a pinch settles.
-    var scaleFactor: CGFloat = 1
+    /// Mean luminance of a stage snapshot under `rect` (view coordinates).
+    func meanLuminance(of snapshot: CGImage, under rect: CGRect) -> Double? {
+        guard let view else { return nil }
+        let target = rect.intersection(view.bounds)
+        guard !target.isNull, target.width >= 2, target.height >= 2 else { return nil }
+        guard let crop = snapshot.cropping(to: target) else { return nil }
+        return ReaderBackdrop.meanLuminance(of: crop)
+    }
 
     func go(to page: Int) {
         guard let view, let document = view.document, document.pageCount > 0 else { return }
