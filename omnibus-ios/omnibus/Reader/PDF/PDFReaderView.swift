@@ -25,6 +25,9 @@ struct PDFReaderView: View {
     /// The document, once resolved. Doubles as the LifecycleSync registration
     /// token.
     @State private var document: PDFDocument?
+    /// The zoom the book was left at — read once as the document opens, so
+    /// the stage restores it on its first layout.
+    @State private var initialZoom: Double?
     @State private var failureMessage: String?
     @State private var page = 0
     @State private var chromeVisible = false
@@ -71,7 +74,14 @@ struct PDFReaderView: View {
             Color.black.ignoresSafeArea()
 
             if let document {
-                PDFStage(document: document, controller: stage, startPage: page, onTap: handleTap)
+                PDFStage(
+                    document: document,
+                    controller: stage,
+                    startPage: page,
+                    onTap: handleTap,
+                    bookUUID: book.uuid,
+                    initialZoom: initialZoom
+                )
                     .ignoresSafeArea()
             } else if failureMessage == nil {
                 LoadingView(label: "Opening \(book.displayTitle)")
@@ -616,6 +626,9 @@ struct PDFReaderView: View {
 
         page = start
         stage.page = start
+        // The zoom is read before the document lands, so the stage's first
+        // layout already knows where the reader left this book.
+        initialZoom = PDFZoomStore.zoom(for: book.uuid)
         document = source
         sessionStart = Date()
 
